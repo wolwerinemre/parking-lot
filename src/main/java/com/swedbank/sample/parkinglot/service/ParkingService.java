@@ -7,13 +7,16 @@ import com.swedbank.sample.parkinglot.util.exception.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.util.CollectionUtils;
 
 import javax.annotation.PostConstruct;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+
+import static org.springframework.util.CollectionUtils.isEmpty;
 
 @Service
 @Slf4j
@@ -40,7 +43,6 @@ public class ParkingService {
                         .setSlots(this.createSlots(i + 1))
                         .setHeight(this.parkingLotProperties.getHeight())
                         .setTotalWeight(this.parkingLotProperties.getWeight()));
-
         }
     }
 
@@ -59,7 +61,7 @@ public class ParkingService {
     public synchronized ParkingDto parkAndCost(final String licensePlate, double weight, double height) {
         Vehicle vehicle = this.createVehicle(licensePlate, weight, height);
         List<ParkingSlot> slots = this.findAvailableSlots(vehicle);
-        if(CollectionUtils.isEmpty(slots)) {
+        if(isEmpty(slots)) {
             throw new NoAvailableSlotException("There is no slot left to fit for :" + licensePlate);
         } else{
             ParkingSlot slot = this.park(getNearestSlot(slots), vehicle);
@@ -67,7 +69,6 @@ public class ParkingService {
                     .setCostOfMinute(costPerMinuteService.calculate(height,weight))
                     .setParkingSlot(slot);
         }
-
     }
 
     public Boolean unpark(final String licensePlate) {
@@ -82,9 +83,8 @@ public class ParkingService {
     private ParkingSlot getSlot(final String licensePlate) {
         return ParkingLot.getInstance().getParkingFloors().stream()
                 .map(ParkingFloor::getSlots)
-                .flatMap(parkingSlots -> parkingSlots.stream()
-                        .filter(parkingSlot -> !parkingSlot.isAvailable() &&
-                                parkingSlot.getVehicle().getPlate().equalsIgnoreCase(licensePlate)))
+                .flatMap(Collection::stream)
+                .filter(checkPlatePredicate(licensePlate))
                 .findFirst()
                 .orElseThrow(() -> new BadRequestException("Vehicle and slot not found :" + licensePlate));
     }
@@ -92,12 +92,16 @@ public class ParkingService {
     private Boolean checkVehicleUniqueness(final String licensePlate) {
         return ParkingLot.getInstance().getParkingFloors().stream()
                 .map(ParkingFloor::getSlots)
-                .flatMap(parkingSlots -> parkingSlots.stream()
-                        .filter(parkingSlot -> !parkingSlot.isAvailable() &&
-                                parkingSlot.getVehicle().getPlate().equalsIgnoreCase(licensePlate))
-                        .map(ParkingSlot::getVehicle))
+                .flatMap(Collection::stream)
+                .filter(checkPlatePredicate(licensePlate))
+                .map(ParkingSlot::getVehicle)
                 .findFirst()
                 .isEmpty();
+    }
+
+    private Predicate<ParkingSlot> checkPlatePredicate(String licensePlate) {
+        return parkingSlot -> !parkingSlot.isAvailable() &&
+                parkingSlot.getVehicle().getPlate().equalsIgnoreCase(licensePlate);
     }
 
     private ParkingSlot park(ParkingSlot slot, Vehicle vehicle) {
